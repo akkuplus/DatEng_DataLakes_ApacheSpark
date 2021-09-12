@@ -85,12 +85,13 @@ First, connect to the S3 and load data to directory:
     cd <path to project>
     mkdir data
     cd data
-    mkdir song_data, log-data
 
 Either extract data/log-data.zip and data/song-data.zip that are provided by this GitHub project in new subfolders (log-data/ or song-data/)
 
     unzip log-data.zip -d log-data
-    unzip song-data.zip -d song-data
+    unzip song-data.zip
+
+The zip file song-data contains the directory song_data, so rename directory `mkdir song_data, log-data`.
 
   or copy raw data from AWS S3 in new subfolders (log-data/ or song-data/):
 
