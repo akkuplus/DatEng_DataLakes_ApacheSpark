@@ -1,8 +1,6 @@
 import configparser
-from datetime import datetime
-import logging as Log
+import logging
 import os
-from pathlib import Path
 from pyspark.sql import SparkSession
 import pyspark.sql.functions as F
 import pyspark.sql.types as T
@@ -14,9 +12,15 @@ config.read('dl.cfg')
 os.environ['AWS_ACCESS_KEY_ID'] = config['AWS']['AWS_ACCESS_KEY_ID']
 os.environ['AWS_SECRET_ACCESS_KEY'] = config['AWS']['AWS_SECRET_ACCESS_KEY']
 
-logger = Log.getLogger(__name__)
-logger.setLevel(Log.DEBUG)
+logger = logging.getLogger(__name__)
+logger.setLevel(level=logging.DEBUG)
 
+fh = logging.FileHandler('event.log')
+fh.setLevel(level=logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+logger.debug("New Spark run")
 
 def create_spark_session():
     """
@@ -28,12 +32,16 @@ def create_spark_session():
         .builder \
         .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:2.7.0") \
         .getOrCreate()
+    # https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/2.7.0/hadoop-aws-2.7.0.jar
+    # https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk/1.7.4/aws-java-sdk-1.7.4.jar
     logger.debug("Created Data Schemas")
 
     spark._jsc.hadoopConfiguration()\
         .set("fs.s3a.access.key", os.environ['AWS_ACCESS_KEY_ID'])
     spark._jsc.hadoopConfiguration()\
         .set("fs.s3a.secret.key", os.environ['AWS_SECRET_ACCESS_KEY'])
+    # spark._jsc.hadoopConfiguration()\
+    #     .set("fs.s3a.fast.upload", "true")
 
     return spark
 
@@ -104,6 +112,7 @@ def process_song_data(spark, input_data, output_data):
     # load song data
     SONG_SCHEMA = get_schemas('SONG')
     df_songs = spark.read.schema(SONG_SCHEMA).json(input_location, multiLine="false")
+    print("\nShowing sample of df_songs:")
     df_songs.show(10, truncate=False)
     logger.debug("Imported Song Data")
 
@@ -113,15 +122,27 @@ def process_song_data(spark, input_data, output_data):
     logger.debug("Exported Song Data to parquet")
 
     # songs-table: extract columns to create songs-table
-    songs_table = df_songs.select(["song_id", "title", "artist_id", "year", "duration"])
-    
+    songs_table = df_songs\
+        .select(["song_id", "title", "artist_id", "year", "duration"])\
+        .drop_duplicates()\
+        .dropna(subset='song_id')
+
+    print("\nShowing sample of songs-table:")
+    songs_table.show(10, truncate=False)
+
     # songs-table: persist to parquet (partitioned by year and artist)
     output_location = os.path.join(output_data, "songs_table.parquet")
     songs_table.write.mode('overwrite').partitionBy("year","artist_id").parquet(output_location)
     logger.debug("Exported songs table as parquet")
 
     # artists-table: extract columns to create artists-table
-    artists_table = df_songs.select(["artist_id", "artist_name", "artist_location", "artist_latitude", "artist_longitude"])
+    artists_table = df_songs\
+        .select(["artist_id", "artist_name", "artist_location", "artist_latitude", "artist_longitude"])\
+        .drop_duplicates()\
+        .dropna(subset="artist_id")
+
+    print("\nShowing sample of artists-table:")
+    artists_table.show(10, truncate=False)
 
     # artists-table: persist artists-table to parquet
     output_location = os.path.join(output_data, "artists_table.parquet")
@@ -134,7 +155,7 @@ def process_song_data(spark, input_data, output_data):
 def process_log_data(spark, input_data, output_data):
     """
     Process the log data files in "log-data" subdirectory.
-    Therewith derive users-table, time-table, and songplays-table.
+    Therewith derive users-table, times-table, and songplays-table.
 
     :param spark: SparkSession
     :param input_data: Project path for Input data. Assuming subdirectory "song-data" holds song data within jsons files.
@@ -154,6 +175,8 @@ def process_log_data(spark, input_data, output_data):
 
     # transform timestamp
     df_logs = df_logs.withColumn("start_time", F.from_unixtime(F.col("ts") / 1000))
+
+    print("\nShowing sample of df_logs:")
     df_logs.show(10, truncate=False)
     logger.debug("Transformed Log Data")
 
@@ -170,25 +193,32 @@ def process_log_data(spark, input_data, output_data):
         F.col("gender"),
         F.col("level")
     )
+    users_table.drop_duplicates().dropna(subset="user_id")
+    print("\nShowing sample of users-table:")
+    users_table.show(10, truncate=False)
 
     # users-table: write to parquet files
     output_location = os.path.join(output_data, "users_table.parquet")
     users_table.write.mode("overwrite").parquet(output_location)
     logger.debug("Exported users table as parquet")
 
-    # time-table: extract columns to create
-    time_table = df_logs.withColumn("hour", F.hour("start_time")) \
+    # times-table: extract columns to create
+    times_table = df_logs.withColumn("hour", F.hour("start_time")) \
         .withColumn("day", F.dayofmonth("start_time")) \
         .withColumn("weekday", F.dayofweek("start_time")) \
         .withColumn("month", F.month("start_time")) \
         .withColumn("week", F.weekofyear("start_time")) \
         .withColumn("year", F.year("start_time")) \
         .select(["start_time", "hour", "day", "week", "weekday", "month", "year"])
-    
-    # time-table: write to parquet files partitioned by year and month
-    output_location = os.path.join(output_data, "time_table.parquet")
-    time_table.write.mode("overwrite").partitionBy("year","month").parquet(output_location)
-    logger.debug("Exported time table as parquet")
+    times_table.drop_duplicates().dropna(subset="start_time")
+
+    print("\nShowing sample of times-table:")
+    times_table.show(10, truncate=False)
+
+    # times-table: write to parquet files partitioned by year and month
+    output_location = os.path.join(output_data, "times_table.parquet")
+    times_table.write.mode("overwrite").partitionBy("year","month").parquet(output_location)
+    logger.debug("Exported times-table as parquet")
 
     # songplays-table: read in song data to use for
     output_location = os.path.join(output_data,"song-data.parquet")
@@ -217,8 +247,13 @@ def process_log_data(spark, input_data, output_data):
             F.col("artist_name"),
             F.col("artist")
     )
-    songplays_table.collect()
-    songplays_table.show(100)
+    songplays_table\
+        .drop_duplicates()\
+        .dropna(subset=["start_time","user_id", "song_id","artist_id"])\
+        .collect()
+
+    print("\nShowing sample of songplays_table:")
+    songplays_table.show(10)
     logger.debug("Derivered songplays data")
 
     # songplays-table: write to parquet files partitioned by year and month

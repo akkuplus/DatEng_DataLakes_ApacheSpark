@@ -52,7 +52,7 @@ The data sets consists of two datasets of files, that are provided in AWS S3 dat
 ## Data Models
 
 The data from both sources is extracted and transformed to five tables that build a star schema. 
-This schema consists of the following tables: "songplays" as the fact table and "artist", "songs", "time", and "users" as dimensional tables.
+This schema consists of the following tables: "songplays" as the fact table and "artist", "songs", "times", and "users" as dimensional tables.
 The following diagram shows the tables, and corresponding fields and attributes.
 
 ![Entity relation diagram for staging final tables](ERD_sql_schema.drawio.png)
